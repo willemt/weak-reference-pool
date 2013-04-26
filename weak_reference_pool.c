@@ -27,6 +27,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
+/**
+ * Note:
+ *
+ * An ID of zero is treated as an unassigned reference 
+ *
+ */
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,7 +84,7 @@ static long __uint_compare(
  * Initialise a weak reference pool.
  * @param get get the actual object using this callback
  * @param remove remove the actual object using this callback
- * @param  insert insert the actual object using this callback
+ * @param  insert insert the actual object using this callback. Used for tombstone.
  * @param dudItem a tombstone for marking removed objects
  */
 void *wr_pool_init(
@@ -92,6 +99,7 @@ void *wr_pool_init(
     assert(get);
     assert(remove);
     assert(dudItem);
+
     pool = calloc(1,sizeof(wr_pool_t));
     pool->get = get;
     pool->insert = insert;
@@ -110,6 +118,7 @@ void wr_pool_release(
     hashmap_iterator_t iter;
     void* key;
 
+    /* free all references */
     for (hashmap_iterator(in(pool)->weakref_map, &iter);
             ((key = hashmap_iterator_next(in(pool)->weakref_map, &iter)));)
     {
@@ -123,6 +132,8 @@ void wr_pool_release(
 
 /**
  * Hold a reference to this object
+ * Refcount is increased.
+ *
  * @param pool : the pool that registers the reference
  * @param id : the ID of the object
  * @return ID belonging to object, otherwise -1 on error */
@@ -144,6 +155,8 @@ int wr_obtain(
 
     /* 2. see if it has been obtained before */
     emem = hashmap_get(in(pool)->weakref_map, (void *) (long) id);
+
+    /* we don't have a weakreference on this object */
     if (!emem)
     {
         assert(in(pool)->weakref_map);
@@ -155,9 +168,11 @@ int wr_obtain(
         hashmap_put(in(pool)->weakref_map, (void *) (long) id, emem);
     }
 
-    /* 3. increment */
+    /* 3. increment refcount */
     emem->weakref_cnt += 1;
-    return id; /* convienence */
+
+    /* for convienence return ID */
+    return id; 
 }
 
 static void __remove_emem_from_pool(
@@ -195,7 +210,9 @@ static void __remove_emem_from_pool(
 }
 
 /**
- * Decrement the reference count on this entity. Will set id to zero
+ * Decrement the reference count on this entity.
+ * Will set ID to zero
+ *
  * @param id the ID of the object we want to release */
 void wr_release(
     void *pool,
@@ -226,7 +243,10 @@ void wr_release(
 }
 
 /**
- * Set id to zero if this entity has been released.
+ * Get the object via the weak reference
+ * Decrement our reference count if the object was removed.
+ * Set ID to zero if this entity has been released.
+ *
  * @return NULL if the object is gone! Ref will be released ie. refcnt -= 1 */
 void *wr_get(
     void *pool,
@@ -241,11 +261,15 @@ void *wr_get(
     if (0 == *id)
         return NULL;
 
+    /* check if we have a weak reference on the object */
     if ((emem = hashmap_get(in(pool)->weakref_map, (void *) (*id))))
     {
         void *item;
 
+        /* get the actual object */
         item = in(pool)->get(*id);
+
+        /* we received the tombstone, therefore, decrement reference count */
         if (item == in(pool)->dudItem)
         {
             wr_release(pool, id);
@@ -258,12 +282,13 @@ void *wr_get(
     }
     else
     {
-        /*  this is actually a little bit invalid? */
         *id = 0;
         return NULL;
     }
 }
 
+/**
+ * @return number of references on this weak reference */
 int wr_get_num_references(
     void *pool,
     const int id
@@ -286,8 +311,8 @@ int wr_get_num_references(
     }
 }
 
-/* 
- * notify the weak reference that this object has been removed.
+/** 
+ * Notify the weak reference that this object has been removed.
  * Replace with dud entity. */
 void wr_remove(
     void *pool,

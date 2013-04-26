@@ -159,6 +159,24 @@ void TestWR_GetGetsObject(
     wr_pool_release(pool);
 }
 
+void TestWR_GetFailsOnNonExistantObject(
+    CuTest * tc
+)
+{
+    void *pool;
+    int id, wr;
+
+    id = 1;
+
+    __init();
+    pool = wr_pool_init(__get, __remove, __insert, __dud);
+
+    wr = wr_obtain(pool, id);
+    CuAssertTrue(tc, -1 == wr);
+
+    wr_pool_release(pool);
+}
+
 void TestWR_ReleaseLowersRefCountAndFailsGetObject(
     CuTest * tc
 )
